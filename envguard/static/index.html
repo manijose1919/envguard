@@ -1,0 +1,282 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>EnvGuard Dashboard</title>
+<style>
+  :root {
+    --bg: #0f1420; --panel: #161d2e; --panel2: #1c2438;
+    --text: #dce3f0; --muted: #8593ad; --line: #2a3450;
+    --err: #ff6b7a; --warn: #ffb454; --info: #6cb2ff; --ok: #4fd6a5;
+    /* chart series: stepped for the dark surface (OKLCH L 0.48-0.67),
+       validated with scripts/validate_palette.js against #161d2e */
+    --s-err: #e04a5e; --s-warn: #c9821f; --s-info: #3987e5;
+  }
+  * { box-sizing: border-box; margin: 0; }
+  body {
+    background: var(--bg); color: var(--text);
+    font: 15px/1.5 system-ui, "Segoe UI", sans-serif;
+    padding: 2rem; max-width: 1100px; margin-inline: auto;
+  }
+  header { display: flex; align-items: baseline; gap: 1rem; flex-wrap: wrap; }
+  h1 { font-size: 1.5rem; }
+  h1 span { color: var(--ok); }
+  #project { color: var(--muted); font-size: .85rem; word-break: break-all; }
+  button {
+    background: var(--ok); color: #08221a; border: 0; border-radius: 8px;
+    padding: .55rem 1.1rem; font-weight: 700; cursor: pointer; font-size: .9rem;
+    margin-left: auto;
+  }
+  button:disabled { opacity: .5; cursor: wait; }
+  .cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px,1fr));
+           gap: .8rem; margin: 1.4rem 0; }
+  .card { background: var(--panel); border: 1px solid var(--line);
+          border-radius: 10px; padding: .9rem 1rem; }
+  .card .num { font-size: 1.7rem; font-weight: 800; }
+  .card .lbl { color: var(--muted); font-size: .78rem; text-transform: uppercase;
+               letter-spacing: .06em; }
+  .num.err { color: var(--err); } .num.warn { color: var(--warn); }
+  .num.info { color: var(--info); } .num.ok { color: var(--ok); }
+  section h2 { font-size: 1.05rem; margin: 1.6rem 0 .6rem; color: var(--muted); }
+  table { width: 100%; border-collapse: collapse; background: var(--panel);
+          border: 1px solid var(--line); border-radius: 10px; overflow: hidden; }
+  th, td { text-align: left; padding: .55rem .8rem; border-bottom: 1px solid var(--line);
+           vertical-align: top; }
+  th { background: var(--panel2); font-size: .75rem; text-transform: uppercase;
+       letter-spacing: .06em; color: var(--muted); }
+  tr:last-child td { border-bottom: 0; }
+  .badge { display: inline-block; padding: .1rem .55rem; border-radius: 999px;
+           font-size: .72rem; font-weight: 700; }
+  .badge.error   { background: #3a1a22; color: var(--err); }
+  .badge.warning { background: #3a2d17; color: var(--warn); }
+  .badge.info    { background: #17293f; color: var(--info); }
+  code { background: var(--panel2); padding: .1rem .4rem; border-radius: 5px;
+         font-size: .85em; }
+  .locs { color: var(--muted); font-size: .8rem; white-space: pre-line; }
+  .empty { padding: 1.2rem; color: var(--ok); background: var(--panel);
+           border: 1px solid var(--line); border-radius: 10px; }
+  #trend-wrap { background: var(--panel); border: 1px solid var(--line);
+                border-radius: 10px; padding: 1rem; position: relative; }
+  #trend-legend { display: flex; gap: 1.2rem; margin-bottom: .5rem;
+                  font-size: .8rem; color: var(--muted); }
+  .swatch { display: inline-block; width: 10px; height: 10px;
+            border-radius: 3px; margin-right: .35rem; vertical-align: -1px; }
+  #trend-tip { position: absolute; pointer-events: none; display: none;
+               background: var(--panel2); border: 1px solid var(--line);
+               border-radius: 8px; padding: .4rem .7rem; font-size: .78rem;
+               white-space: nowrap; z-index: 2; }
+  #trend svg { display: block; width: 100%; }
+  #history tr { cursor: pointer; }
+  #history tr:hover td { background: var(--panel2); }
+  #history tr.active td { background: #1a3a30; }
+  .muted { color: var(--muted); }
+</style>
+</head>
+<body>
+<header>
+  <h1>Env<span>Guard</span></h1>
+  <div id="project" class="muted"></div>
+  <button id="rescan">Re-scan project</button>
+</header>
+
+<div class="cards">
+  <div class="card"><div class="num err"  id="c-err">–</div><div class="lbl">Errors</div></div>
+  <div class="card"><div class="num warn" id="c-warn">–</div><div class="lbl">Warnings</div></div>
+  <div class="card"><div class="num info" id="c-info">–</div><div class="lbl">Info</div></div>
+  <div class="card"><div class="num ok"   id="c-keys">–</div><div class="lbl">Declared keys</div></div>
+</div>
+
+<section>
+  <h2>Drift trend</h2>
+  <div id="trend-wrap">
+    <div id="trend-legend">
+      <span><span class="swatch" style="background:var(--s-err)"></span>Errors</span>
+      <span><span class="swatch" style="background:var(--s-warn)"></span>Warnings</span>
+      <span><span class="swatch" style="background:var(--s-info)"></span>Info</span>
+    </div>
+    <div id="trend"></div>
+    <div id="trend-tip"></div>
+  </div>
+</section>
+
+<section>
+  <h2 id="findings-title">Findings</h2>
+  <div id="findings"></div>
+</section>
+
+<section>
+  <h2>Scan history <span class="muted">(click a row to inspect)</span></h2>
+  <div id="history"></div>
+</section>
+
+<script>
+"use strict";
+const $ = id => document.getElementById(id);
+const esc = s => String(s).replace(/[&<>"']/g,
+  c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+
+let scans = [];
+let activeId = null;
+
+async function getJSON(url, opts) {
+  const r = await fetch(url, opts);
+  if (!r.ok) throw new Error((await r.json().catch(() => ({}))).error || r.statusText);
+  return r.json();
+}
+
+function renderCards(scan) {
+  $("c-err").textContent  = scan ? scan.errors   : 0;
+  $("c-warn").textContent = scan ? scan.warnings : 0;
+  $("c-info").textContent = scan ? scan.infos    : 0;
+  $("c-keys").textContent = scan ? scan.keys_declared : 0;
+  $("project").textContent = scan ? scan.project_dir : "";
+}
+
+function renderFindings(findings) {
+  if (!findings.length) {
+    $("findings").innerHTML =
+      '<div class="empty">No drift detected — env files are in sync with code.</div>';
+    return;
+  }
+  const rows = findings.map(f => `
+    <tr>
+      <td><span class="badge ${esc(f.severity)}">${esc(f.severity)}</span></td>
+      <td><strong>${esc(f.kind)}</strong></td>
+      <td><code>${esc(f.key)}</code></td>
+      <td>${esc(f.detail)}
+        ${f.locations.length ? `<div class="locs">${esc(f.locations.join("\n"))}</div>` : ""}
+      </td>
+    </tr>`).join("");
+  $("findings").innerHTML =
+    `<table><thead><tr><th>Severity</th><th>Kind</th><th>Key</th><th>Detail</th></tr></thead>
+     <tbody>${rows}</tbody></table>`;
+}
+
+function renderHistory() {
+  if (!scans.length) {
+    $("history").innerHTML = '<div class="empty muted">No scans recorded yet.</div>';
+    return;
+  }
+  const rows = scans.map(s => `
+    <tr data-id="${s.id}" class="${s.id === activeId ? "active" : ""}">
+      <td>#${s.id}</td><td>${esc(s.created_at.slice(0, 19).replace("T", " "))}</td>
+      <td>${s.files_scanned}</td><td>${s.refs_found}</td><td>${s.keys_declared}</td>
+      <td class="num err">${s.errors}</td><td class="num warn">${s.warnings}</td>
+      <td class="num info">${s.infos}</td>
+    </tr>`).join("");
+  $("history").innerHTML =
+    `<table><thead><tr><th>Scan</th><th>When (UTC)</th><th>Files</th><th>Refs</th>
+     <th>Keys</th><th>Err</th><th>Warn</th><th>Info</th></tr></thead>
+     <tbody>${rows}</tbody></table>`;
+  $("history").querySelectorAll("tr[data-id]").forEach(tr =>
+    tr.addEventListener("click", () => selectScan(Number(tr.dataset.id))));
+}
+
+const SERIES = [
+  { field: "errors",   label: "Errors",   color: "var(--s-err)" },
+  { field: "warnings", label: "Warnings", color: "var(--s-warn)" },
+  { field: "infos",    label: "Info",     color: "var(--s-info)" },
+];
+
+function renderTrend() {
+  const box = $("trend");
+  if (scans.length < 2) {
+    box.innerHTML = '<div class="muted" style="font-size:.85rem">' +
+      "Trend appears once two or more scans are recorded.</div>";
+    return;
+  }
+  const data = [...scans].reverse();               // oldest -> newest
+  const W = 940, H = 190, pad = { l: 34, r: 84, t: 10, b: 24 };
+  const iw = W - pad.l - pad.r, ih = H - pad.t - pad.b;
+  const yMax = Math.max(1, ...data.flatMap(s => SERIES.map(k => s[k.field])));
+  const x = i => pad.l + (data.length === 1 ? iw / 2 : i * iw / (data.length - 1));
+  const y = v => pad.t + ih - (v / yMax) * ih;
+
+  const gridSteps = Math.min(4, yMax);
+  let g = "";
+  for (let i = 0; i <= gridSteps; i++) {
+    const v = Math.round(yMax * i / gridSteps), yy = y(v);
+    g += `<line x1="${pad.l}" y1="${yy}" x2="${W - pad.r}" y2="${yy}"
+            stroke="var(--line)" stroke-width="1"/>
+          <text x="${pad.l - 8}" y="${yy + 4}" text-anchor="end"
+            font-size="10" fill="var(--muted)">${v}</text>`;
+  }
+  let marks = "";
+  for (const s of SERIES) {
+    const pts = data.map((d, i) => `${x(i)},${y(d[s.field])}`).join(" ");
+    marks += `<polyline points="${pts}" fill="none" stroke="${s.color}"
+                stroke-width="2" stroke-linejoin="round"/>`;
+    marks += data.map((d, i) =>
+      `<circle cx="${x(i)}" cy="${y(d[s.field])}" r="4" fill="${s.color}"
+         stroke="var(--panel)" stroke-width="2"/>`).join("");
+    const last = data[data.length - 1];
+    marks += `<text x="${W - pad.r + 10}" y="${y(last[s.field]) + 4}"
+        font-size="11" fill="var(--muted)">${s.label}</text>`;
+  }
+  const ticks = data.map((d, i) =>
+    `<text x="${x(i)}" y="${H - 6}" text-anchor="middle" font-size="10"
+       fill="var(--muted)">#${d.id}</text>`).join("");
+  box.innerHTML =
+    `<svg viewBox="0 0 ${W} ${H}" role="img" aria-label="Findings per scan">
+       ${g}${marks}${ticks}
+       <line id="xhair" y1="${pad.t}" y2="${pad.t + ih}" stroke="var(--muted)"
+         stroke-width="1" stroke-dasharray="3 3" visibility="hidden"/>
+     </svg>`;
+
+  const svg = box.querySelector("svg"), tip = $("trend-tip"),
+        xhair = svg.querySelector("#xhair");
+  svg.addEventListener("mousemove", ev => {
+    const r = svg.getBoundingClientRect();
+    const mx = (ev.clientX - r.left) * (W / r.width);
+    let best = 0;
+    data.forEach((_, i) => { if (Math.abs(x(i) - mx) < Math.abs(x(best) - mx)) best = i; });
+    const d = data[best];
+    xhair.setAttribute("x1", x(best)); xhair.setAttribute("x2", x(best));
+    xhair.setAttribute("visibility", "visible");
+    tip.innerHTML = `<strong>Scan #${d.id}</strong> · ${esc(d.created_at.slice(0, 16).replace("T", " "))}<br>` +
+      SERIES.map(s => `${s.label}: <strong>${d[s.field]}</strong>`).join(" · ");
+    tip.style.display = "block";
+    const wrap = $("trend-wrap").getBoundingClientRect();
+    let tx = ev.clientX - wrap.left + 14;
+    tip.style.top = (ev.clientY - wrap.top + 14) + "px";
+    if (tx + tip.offsetWidth > wrap.width - 8) tx -= tip.offsetWidth + 28;
+    tip.style.left = tx + "px";
+  });
+  svg.addEventListener("mouseleave", () => {
+    tip.style.display = "none"; xhair.setAttribute("visibility", "hidden");
+  });
+}
+
+async function selectScan(id) {
+  activeId = id;
+  const data = await getJSON(`/api/scans/${id}`);
+  $("findings-title").textContent = `Findings — scan #${id}`;
+  renderFindings(data.findings);
+  renderCards(scans.find(s => s.id === id));
+  renderHistory();
+}
+
+async function refresh() {
+  scans = (await getJSON("/api/scans")).scans;
+  renderTrend();
+  if (scans.length) await selectScan(scans[0].id);
+  else { renderCards(null); renderFindings([]); renderHistory(); }
+}
+
+$("rescan").addEventListener("click", async () => {
+  const btn = $("rescan");
+  btn.disabled = true; btn.textContent = "Scanning...";
+  try { await getJSON("/api/rescan", { method: "POST" }); await refresh(); }
+  catch (e) {
+    $("findings").innerHTML = `<div class="empty">Rescan failed: ${esc(e.message)}</div>`;
+  }
+  finally { btn.disabled = false; btn.textContent = "Re-scan project"; }
+});
+
+refresh().catch(e => {
+  $("findings").innerHTML = `<div class="empty">Failed to load: ${esc(e.message)}</div>`;
+});
+</script>
+</body>
+</html>
