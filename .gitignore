@@ -2,3 +2,11 @@ __pycache__/
 *.pyc
 .envguard.db
 demo/.envguard.db
+
+# Real env files. The demo fixture is the one exception — CI and `scan demo`
+# need it in the tree, and it contains only placeholders.
+.env
+.env.*
+!.env.example
+!**/.env.example
+!demo/.env

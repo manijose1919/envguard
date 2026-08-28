@@ -143,6 +143,7 @@ envguard/
   static/index.html   self-contained dashboard
 tests/          python -m unittest discover tests
 demo/           fixture project with deliberate drift — try:  envguard scan demo
+                (`demo/.env` is a committed placeholder file, not a secret)
 ```
 
 Add `.envguard.db` to your project's `.gitignore`.
